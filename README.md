@@ -4,7 +4,7 @@ Admin web app (PWA) for managing hackathon events: teams, rooms, mentors.
 
 Stack: Vite + React + TypeScript, React Router, vite-plugin-pwa.
 
-The Profile tab lets users edit their name, birthdate, email, and phone number. Profile details are saved in the browser's local storage; authentication and account syncing are not connected yet.
+Sign-up collects a name, date of birth, email, phone number, and password. In demo mode, multiple accounts and their salted PBKDF2 password verifiers are saved in this browser's local storage; sign-in checks the email and password against the matching account. Each email can be used once, and the Profile tab edits the currently signed-in account. This is not server-backed authentication and should not be used to protect real accounts.
 
 ## Run locally
     cd web

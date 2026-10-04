@@ -8,42 +8,147 @@ type Profile = {
   phone: string
 }
 
+type PasswordCredential = {
+  salt: string
+  hash: string
+}
+
+type SavedAccount = {
+  profile: Profile
+  credential: PasswordCredential | null
+}
+
 const profileStorageKey = 'mule-hacks-profile'
 const emptyProfile: Profile = { name: '', birthdate: '', email: '', phone: '' }
+const passwordHashIterations = 310_000
 
-function readSavedProfile(): { profile: Profile; error: string } {
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase()
+}
+
+function getTodayDate(): string {
+  const today = new Date()
+  const year = today.getFullYear()
+  const month = String(today.getMonth() + 1).padStart(2, '0')
+  const day = String(today.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function formatPhoneNumber(value: string): string {
+  const digits = value.replace(/\D/g, '').slice(0, 10)
+  if (digits.length <= 3) return digits
+  if (digits.length <= 6) return `${digits.slice(0, 3)}-${digits.slice(3)}`
+  return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`
+}
+
+function isProfile(value: unknown): value is Profile {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'name' in value &&
+    typeof value.name === 'string' &&
+    'birthdate' in value &&
+    typeof value.birthdate === 'string' &&
+    'email' in value &&
+    typeof value.email === 'string' &&
+    'phone' in value &&
+    typeof value.phone === 'string'
+  )
+}
+
+function isPasswordCredential(value: unknown): value is PasswordCredential {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'salt' in value &&
+    typeof value.salt === 'string' &&
+    /^[0-9a-f]{32}$/.test(value.salt) &&
+    'hash' in value &&
+    typeof value.hash === 'string' &&
+    /^[0-9a-f]{64}$/.test(value.hash)
+  )
+}
+
+function readSavedAccounts(): { accounts: SavedAccount[]; error: string } {
   try {
-    const savedProfile = localStorage.getItem(profileStorageKey)
-    if (!savedProfile) return { profile: emptyProfile, error: '' }
+    const savedAccounts = localStorage.getItem(profileStorageKey)
+    if (!savedAccounts) return { accounts: [], error: '' }
 
-    const parsed: unknown = JSON.parse(savedProfile)
-    if (
-      typeof parsed !== 'object' ||
-      parsed === null ||
-      !('name' in parsed) ||
-      !('birthdate' in parsed) ||
-      !('email' in parsed) ||
-      !('phone' in parsed) ||
-      typeof parsed.name !== 'string' ||
-      typeof parsed.birthdate !== 'string' ||
-      typeof parsed.email !== 'string' ||
-      typeof parsed.phone !== 'string'
-    ) {
-      return { profile: emptyProfile, error: 'The saved profile is invalid. Please enter your details again.' }
+    const parsed: unknown = JSON.parse(savedAccounts)
+    if (typeof parsed !== 'object' || parsed === null) {
+      return { accounts: [], error: 'The saved accounts are invalid. Please sign up again.' }
+    }
+
+    let accountRecords: unknown[]
+    if ('accounts' in parsed && Array.isArray(parsed.accounts)) {
+      accountRecords = parsed.accounts
+    } else {
+      accountRecords = [parsed]
+    }
+
+    const accounts: SavedAccount[] = []
+    for (const record of accountRecords) {
+      if (typeof record !== 'object' || record === null) {
+        return { accounts: [], error: 'The saved accounts are invalid. Please sign up again.' }
+      }
+      const isAccountRecord = 'profile' in record
+      const profile = isAccountRecord ? record.profile : record
+      const credential = isAccountRecord && 'credential' in record ? record.credential : null
+      if (!isProfile(profile) || (credential !== null && !isPasswordCredential(credential))) {
+        return { accounts: [], error: 'A saved account is invalid. Please sign up again.' }
+      }
+      accounts.push({
+        profile: { ...profile, phone: formatPhoneNumber(profile.phone) },
+        credential,
+      })
+    }
+
+    const emails = accounts.map(({ profile }) => normalizeEmail(profile.email))
+    if (new Set(emails).size !== emails.length) {
+      return { accounts: [], error: 'Saved accounts contain duplicate email addresses. Please contact support.' }
     }
 
     return {
-      profile: {
-        name: parsed.name,
-        birthdate: parsed.birthdate,
-        email: parsed.email,
-        phone: parsed.phone,
-      },
+      accounts,
       error: '',
     }
   } catch {
-    return { profile: emptyProfile, error: 'The saved profile could not be loaded. Please enter your details again.' }
+    return { accounts: [], error: 'The saved accounts could not be loaded. Please try again.' }
   }
+}
+
+function toHex(value: Uint8Array): string {
+  return Array.from(value, (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+async function hashPassword(password: string, salt: string): Promise<string> {
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(password),
+    'PBKDF2',
+    false,
+    ['deriveBits'],
+  )
+  const hash = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: Uint8Array.from(salt.match(/.{2}/g) ?? [], (byte) => Number.parseInt(byte, 16)), iterations: passwordHashIterations, hash: 'SHA-256' },
+    keyMaterial,
+    256,
+  )
+  return toHex(new Uint8Array(hash))
+}
+
+async function createPasswordCredential(password: string): Promise<PasswordCredential> {
+  const salt = toHex(crypto.getRandomValues(new Uint8Array(16)))
+  return { salt, hash: await hashPassword(password, salt) }
+}
+
+async function verifyPassword(password: string, credential: PasswordCredential): Promise<boolean> {
+  const candidate = await hashPassword(password, credential.salt)
+  let difference = 0
+  for (let index = 0; index < candidate.length; index += 1) {
+    difference |= candidate.charCodeAt(index) ^ credential.hash.charCodeAt(index)
+  }
+  return difference === 0
 }
 
 const pages = [
@@ -70,15 +175,14 @@ function ProfilePage({
 }: {
   profile: Profile
   error: string
-  onSave: (profile: Profile) => void
+  onSave: (profile: Profile) => boolean
 }) {
   const [formProfile, setFormProfile] = useState(profile)
   const [saved, setSaved] = useState(false)
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    onSave(formProfile)
-    setSaved(true)
+    setSaved(onSave(formProfile))
   }
 
   return (
@@ -108,11 +212,13 @@ function ProfilePage({
             <input
               type="date"
               autoComplete="bday"
+              max={getTodayDate()}
               value={formProfile.birthdate}
               onChange={(event) => {
                 setFormProfile({ ...formProfile, birthdate: event.target.value })
                 setSaved(false)
               }}
+              required
             />
           </label>
           <label>
@@ -133,9 +239,13 @@ function ProfilePage({
             <input
               type="tel"
               autoComplete="tel"
+              inputMode="numeric"
+              placeholder="xxx-xxx-xxxx"
+              pattern="[0-9]{3}-[0-9]{3}-[0-9]{4}"
+              title="Enter a 10-digit phone number in xxx-xxx-xxxx format."
               value={formProfile.phone}
               onChange={(event) => {
-                setFormProfile({ ...formProfile, phone: event.target.value })
+                setFormProfile({ ...formProfile, phone: formatPhoneNumber(event.target.value) })
                 setSaved(false)
               }}
             />
@@ -150,32 +260,64 @@ function ProfilePage({
 }
 
 function AuthScreen({
-  profile,
+  accounts,
   onAuthenticated,
 }: {
-  profile: Profile
-  onAuthenticated: (profile: Profile) => void
+  accounts: SavedAccount[]
+  onAuthenticated: (profile: Profile, credential: PasswordCredential | null, isSignUp: boolean) => boolean
 }) {
   const [isSignUp, setIsSignUp] = useState(false)
   const [error, setError] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const formData = new FormData(event.currentTarget)
-    const password = formData.get('password')
-    const confirmPassword = formData.get('confirmPassword')
-
-    if (isSignUp && password !== confirmPassword) {
-      setError('Your passwords do not match.')
-      return
-    }
+    const password = String(formData.get('password'))
+    const email = String(formData.get('email')).trim().toLowerCase()
 
     setError('')
-    onAuthenticated({
-      ...(isSignUp ? emptyProfile : profile),
-      name: isSignUp ? String(formData.get('name')) : profile.name,
-      email: String(formData.get('email')),
-    })
+    setIsSubmitting(true)
+    try {
+      if (isSignUp) {
+        if (password !== formData.get('confirmPassword')) {
+          setError('Your passwords do not match.')
+          return
+        }
+
+        if (accounts.some(({ profile }) => normalizeEmail(profile.email) === email)) {
+          setError('An account with this email already exists. Sign in instead.')
+          return
+        }
+
+        const nextProfile = {
+          ...emptyProfile,
+          name: String(formData.get('name')).trim(),
+          birthdate: String(formData.get('birthdate')),
+          email,
+          phone: String(formData.get('phone')),
+        }
+        const nextCredential = await createPasswordCredential(password)
+        if (!onAuthenticated(nextProfile, nextCredential, true)) {
+          setError('Your account could not be saved. Check your browser storage settings and try again.')
+        }
+        return
+      }
+
+      const account = accounts.find(({ profile }) => normalizeEmail(profile.email) === email)
+      if (!account?.credential || !(await verifyPassword(password, account.credential))) {
+        setError('Email or password is incorrect.')
+        return
+      }
+
+      if (!onAuthenticated(account.profile, account.credential, false)) {
+        setError('Your account could not be loaded. Check your browser storage settings and try again.')
+      }
+    } catch {
+      setError('Authentication could not be completed. Make sure browser cryptography is available and try again.')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -230,6 +372,12 @@ function AuthScreen({
               <input name="name" type="text" placeholder="Your name" autoComplete="name" required />
             </label>
           )}
+          {isSignUp && (
+            <label>
+              Date of birth
+              <input name="birthdate" type="date" autoComplete="bday" max={getTodayDate()} required />
+            </label>
+          )}
           <label>
             Email address
             <input
@@ -240,6 +388,24 @@ function AuthScreen({
               required
             />
           </label>
+          {isSignUp && (
+            <label>
+              Phone number
+              <input
+                name="phone"
+                type="tel"
+                placeholder="xxx-xxx-xxxx"
+                autoComplete="tel"
+                inputMode="numeric"
+                pattern="[0-9]{3}-[0-9]{3}-[0-9]{4}"
+                title="Enter a 10-digit phone number in xxx-xxx-xxxx format."
+                onChange={(event) => {
+                  event.currentTarget.value = formatPhoneNumber(event.currentTarget.value)
+                }}
+                required
+              />
+            </label>
+          )}
           <label>
             Password
             <input
@@ -265,8 +431,8 @@ function AuthScreen({
             </label>
           )}
           {error && <p className="auth-error" role="alert">{error}</p>}
-          <button className="auth-submit" type="submit">
-            {isSignUp ? 'Create account' : 'Sign in'}
+          <button className="auth-submit" type="submit" disabled={isSubmitting}>
+            {isSubmitting ? 'Please wait…' : isSignUp ? 'Create account' : 'Sign in'}
             <span aria-hidden="true">→</span>
           </button>
         </form>
@@ -283,7 +449,7 @@ function AuthScreen({
             {isSignUp ? 'Sign in' : 'Create an account'}
           </button>
         </p>
-        <p className="demo-notice">Demo mode · Authentication is not connected yet</p>
+        <p className="demo-notice">Demo mode · Account is saved in this browser only</p>
       </section>
       <aside className="auth-aside" aria-label="About Mule Hacks">
         <div className="aside-orb orb-one" />
@@ -304,28 +470,78 @@ function AuthScreen({
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [savedProfile] = useState(readSavedProfile)
-  const [profile, setProfile] = useState(savedProfile.profile)
-  const [profileError, setProfileError] = useState(savedProfile.error)
+  const [savedAccounts] = useState(readSavedAccounts)
+  const [accounts, setAccounts] = useState(savedAccounts.accounts)
+  const [profile, setProfile] = useState(emptyProfile)
+  const [activeEmail, setActiveEmail] = useState('')
+  const [profileError, setProfileError] = useState(savedAccounts.error)
 
-  function persistProfile(nextProfile: Profile) {
-    try {
-      localStorage.setItem(profileStorageKey, JSON.stringify(nextProfile))
+  function authenticateAccount(
+    nextProfile: Profile,
+    nextCredential: PasswordCredential | null,
+    isSignUp: boolean,
+  ): boolean {
+    if (!isSignUp) {
       setProfile(nextProfile)
+      setActiveEmail(normalizeEmail(nextProfile.email))
       setProfileError('')
+      setIsAuthenticated(true)
+      return true
+    }
+
+    if (accounts.some(({ profile: savedProfile }) =>
+      normalizeEmail(savedProfile.email) === normalizeEmail(nextProfile.email))) {
+      return false
+    }
+
+    const nextAccounts = [...accounts, { profile: nextProfile, credential: nextCredential }]
+    try {
+      localStorage.setItem(profileStorageKey, JSON.stringify({ accounts: nextAccounts }))
+      setAccounts(nextAccounts)
+      setProfile(nextProfile)
+      setActiveEmail(normalizeEmail(nextProfile.email))
+      setProfileError('')
+      setIsAuthenticated(true)
+      return true
+    } catch {
+      setProfileError('Your account could not be saved. Check your browser storage settings and try again.')
+      return false
+    }
+  }
+
+  function persistProfile(nextProfile: Profile): boolean {
+    const accountIndex = accounts.findIndex(({ profile: savedProfile }) =>
+      normalizeEmail(savedProfile.email) === activeEmail)
+    if (accountIndex === -1) {
+      setProfileError('Your account could not be found. Please sign in again.')
+      return false
+    }
+    if (accounts.some(({ profile: savedProfile }, index) =>
+      index !== accountIndex && normalizeEmail(savedProfile.email) === normalizeEmail(nextProfile.email))) {
+      setProfileError('Another account already uses this email address.')
+      return false
+    }
+
+    const nextAccounts = accounts.map((account, index) =>
+      index === accountIndex ? { ...account, profile: nextProfile } : account)
+    try {
+      localStorage.setItem(profileStorageKey, JSON.stringify({ accounts: nextAccounts }))
+      setAccounts(nextAccounts)
+      setProfile(nextProfile)
+      setActiveEmail(normalizeEmail(nextProfile.email))
+      setProfileError('')
+      return true
     } catch {
       setProfileError('Your profile could not be saved. Check your browser storage settings and try again.')
+      return false
     }
   }
 
   if (!isAuthenticated) {
     return (
       <AuthScreen
-        profile={profile}
-        onAuthenticated={(authenticatedProfile) => {
-          persistProfile(authenticatedProfile)
-          setIsAuthenticated(true)
-        }}
+        accounts={accounts}
+        onAuthenticated={authenticateAccount}
       />
     )
   }
