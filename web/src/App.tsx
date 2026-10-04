@@ -835,7 +835,7 @@ function AuthScreen({
           </button>
         </form>
         <p className="auth-switch">
-          {isSignUp ? 'Already have an account?' : 'New to Mule Hacks?'}{' '}
+          {isSignUp ? 'Already have an account?' : 'New to Eventov?'}{' '}
           <button type="button" onClick={() => switchMode(!isSignUp)}>{isSignUp ? 'Sign in' : 'Create an account'}</button>
         </p>
         <p className="demo-notice">Demo mode · Accounts are saved in this browser only</p>
