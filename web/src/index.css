@@ -142,6 +142,23 @@ h1 { margin-bottom: 8px; font: 600 32px/1.2 system-ui, sans-serif; letter-spacin
 .management-card .team-description { margin: -4px 0 16px; color: #686d76; font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 .member-list { display: grid; gap: 7px; margin: 0 0 16px; padding: 0; list-style: none; }
 .member-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 9px; border-radius: 5px; background: #f7f8fa; color: #50555d; font-size: 12px; }
+.member-list li > span { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.member-list li > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.member-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.team-move-controls { display: flex; align-items: center; gap: 6px; padding: 4px 5px 4px 8px; border: 1px solid #f0d4cc; border-radius: 7px; background: linear-gradient(180deg, #fff8f5 0%, #fff 100%); }
+.team-move-controls select {
+  min-width: 150px;
+  min-height: 30px;
+  padding: 0 30px 0 9px;
+  border: 1px solid #e0e2e7;
+  border-radius: 6px;
+  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M5 7.5L10 12.5L15 7.5' stroke='%23555b65' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 9px center / 12px 12px;
+  color: #3d434b;
+  font-size: 11px;
+  appearance: none;
+}
+.team-move-controls select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #eb5a3518; outline: none; }
+.team-move-controls .button { min-height: 30px; padding: 0 10px; font-size: 10px; }
 .member-remove { flex: 0 0 auto; padding: 4px 7px; border: 1px solid #edc9bf; border-radius: 5px; background: #fff; color: #a43f25; font-size: 10px; cursor: pointer; }
 .member-remove:hover { border-color: #d94a27; background: #fff2ee; }
 .input-action { display: flex; gap: 7px; }

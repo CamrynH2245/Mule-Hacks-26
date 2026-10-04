@@ -862,6 +862,7 @@ function EventResources({
   const [inviteTeamId, setInviteTeamId] = useState<string | null>(null)
   const [inviteEmail, setInviteEmail] = useState('')
   const [teamManagementFeedback, setTeamManagementFeedback] = useState('')
+  const [memberMoveSelections, setMemberMoveSelections] = useState<Record<string, string>>({})
   const normalizedCurrentEmail = normalizeEmail(currentEmail)
   const claimableTeams = event.teams.filter((team) =>
     normalizeEmail(team.createdByEmail ?? '') === normalizedCurrentEmail ||
@@ -928,6 +929,58 @@ function EventResources({
         ? { ...team, members: team.members.filter((member) => normalizeEmail(member.email) !== normalizeEmail(memberEmail)) }
         : team),
     }))
+  }
+
+  function moveMember(teamId: string, memberEmail: string, destinationTeamId: string) {
+    if (!isEventCreator) return
+    const sourceTeam = event.teams.find((candidate) => candidate.id === teamId)
+    const destinationTeam = event.teams.find((candidate) => candidate.id === destinationTeamId)
+    if (!sourceTeam || !destinationTeam || destinationTeamId === teamId) {
+      setTeamManagementFeedback('Choose another team to move this member to.')
+      return
+    }
+    const normalizedMemberEmail = normalizeEmail(memberEmail)
+    const member = sourceTeam.members.find((candidate) => normalizeEmail(candidate.email) === normalizedMemberEmail)
+    if (!member) {
+      setTeamManagementFeedback('That member is no longer on this team.')
+      return
+    }
+    if (destinationTeam.members.some((candidate) => normalizeEmail(candidate.email) === normalizedMemberEmail)) {
+      setTeamManagementFeedback('This person is already on the selected team.')
+      return
+    }
+    if (destinationTeam.members.length + (destinationTeam.invitedEmails?.length ?? 0) >= event.maxTeamMembers) {
+      setTeamManagementFeedback(`The destination team has reached its limit of ${event.maxTeamMembers} members, including pending invitations.`)
+      return
+    }
+    const saved = onUpdate((current) => ({
+      ...current,
+      teams: current.teams.map((currentTeam) => {
+        if (currentTeam.id === teamId) {
+          return {
+            ...currentTeam,
+            members: currentTeam.members.filter((candidate) => normalizeEmail(candidate.email) !== normalizedMemberEmail),
+          }
+        }
+        if (currentTeam.id === destinationTeamId) {
+          return {
+            ...currentTeam,
+            members: [...currentTeam.members, { ...member, email: member.email }],
+          }
+        }
+        return currentTeam
+      }),
+    }))
+    if (saved) {
+      setMemberMoveSelections((current) => {
+        const next = { ...current }
+        delete next[normalizedMemberEmail]
+        return next
+      })
+      setTeamManagementFeedback(`${member.name} was moved to ${destinationTeam.name}.`)
+    } else {
+      setTeamManagementFeedback('The member could not be moved. Please try again.')
+    }
   }
 
   function saveTeamDetails(eventForm: FormEvent<HTMLFormElement>, teamId: string) {
@@ -1195,6 +1248,9 @@ function EventResources({
                   <ul className="member-list">{team.members.map((member, index) => {
                     const currentProfile = profiles.find((savedProfile) =>
                       member.email && normalizeEmail(savedProfile.email) === normalizeEmail(member.email))
+                    const memberKey = member.email ? normalizeEmail(member.email) : `${team.id}-${index}`
+                    const otherTeams = event.teams.filter((candidate) => candidate.id !== team.id)
+                    const selectedMoveTeam = member.email ? (memberMoveSelections[memberKey] ?? '') : ''
                     return (
                       <li key={`${team.id}-${member.email || index}`}>
                         <span>
@@ -1205,14 +1261,38 @@ function EventResources({
                           normalizeEmail(team.createdByEmail) === normalizedCurrentEmail)) &&
                           member.email &&
                           (isEventCreator || normalizeEmail(member.email) !== normalizedCurrentEmail) && (
-                          <button
-                            className="member-remove"
-                            type="button"
-                            aria-label={`Remove ${currentProfile?.name ?? member.name} from ${team.name}`}
-                            onClick={() => removeMember(team.id, member.email)}
-                          >
-                            Remove
-                          </button>
+                          <div className="member-actions">
+                            {isEventCreator && managedTeamId === team.id && otherTeams.length > 0 && (
+                              <div className="team-move-controls">
+                                <select
+                                  aria-label={`Move ${currentProfile?.name ?? member.name} to another team`}
+                                  value={selectedMoveTeam}
+                                  onChange={(event) => setMemberMoveSelections((current) => ({ ...current, [memberKey]: event.target.value }))}
+                                >
+                                  <option value="">Move to…</option>
+                                  {otherTeams.map((candidate) => (
+                                    <option key={candidate.id} value={candidate.id}>{candidate.name}</option>
+                                  ))}
+                                </select>
+                                <button
+                                  className="button button-secondary"
+                                  type="button"
+                                  disabled={!selectedMoveTeam}
+                                  onClick={() => moveMember(team.id, member.email, selectedMoveTeam)}
+                                >
+                                  Move
+                                </button>
+                              </div>
+                            )}
+                            <button
+                              className="member-remove"
+                              type="button"
+                              aria-label={`Remove ${currentProfile?.name ?? member.name} from ${team.name}`}
+                              onClick={() => removeMember(team.id, member.email)}
+                            >
+                              Remove
+                            </button>
+                          </div>
                         )}
                       </li>
                     )
