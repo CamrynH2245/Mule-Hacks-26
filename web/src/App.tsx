@@ -284,7 +284,7 @@ function Dashboard({
     <section className="dashboard">
       <div className="page-heading">
         <div>
-          <p className="eyebrow">EVENT HOSTING</p>
+          <p className="eyebrow">EVENTOV</p>
           <h1>Dashboard</h1>
           <p className="page-description">Create and manage your hackathon events.</p>
         </div>
@@ -1200,8 +1200,8 @@ function EventDashboard({
   return (
     <div className="layout">
       <header className="topbar">
-        <Link to="/" className="brand-mark" aria-label="Event Hosting dashboard">E</Link>
-        <Link to="/" className="brand-name">Event Hosting</Link>
+        <Link to="/" className="brand-mark" aria-label="Eventov dashboard">E</Link>
+        <Link to="/" className="brand-name">Eventov</Link>
         <div className="account-actions">
           <span>{profile.name}</span>
           <button className="sign-out" type="button" onClick={onSignOut}>Sign out</button>
