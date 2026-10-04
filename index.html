@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f4ef">
+  <title>Eventov | Group list</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #20251f;
+      background: #f6f4ef;
+      font-synthesis: none;
+      text-rendering: optimizeLegibility;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      padding: 32px 20px;
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(ellipse at 10% 10%, #e8eedf 0, transparent 34rem),
+        #f6f4ef;
+    }
+
+    main {
+      width: min(100%, 640px);
+      padding: clamp(28px, 7vw, 56px);
+      border: 1px solid #e6e4dc;
+      border-radius: 24px;
+      background: #fffefa;
+      box-shadow: 0 24px 70px rgb(32 37 31 / 8%);
+    }
+
+    .eyebrow {
+      margin: 0 0 12px;
+      color: #647b52;
+      font-size: 0.78rem;
+      font-weight: 750;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(2.2rem, 8vw, 3.5rem);
+      letter-spacing: -0.06em;
+      line-height: 1;
+    }
+
+    .intro {
+      max-width: 42ch;
+      margin: 16px 0 32px;
+      color: #697067;
+      line-height: 1.65;
+    }
+
+    form {
+      display: flex;
+      gap: 10px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 9px;
+      font-size: 0.9rem;
+      font-weight: 650;
+    }
+
+    .field {
+      flex: 1;
+      min-width: 0;
+    }
+
+    input {
+      width: 100%;
+      min-height: 48px;
+      padding: 0 14px;
+      border: 1px solid #d9ddd4;
+      border-radius: 10px;
+      background: #fff;
+      color: inherit;
+      font: inherit;
+    }
+
+    input:focus-visible,
+    button:focus-visible {
+      outline: 3px solid #a6c28d;
+      outline-offset: 2px;
+    }
+
+    button {
+      align-self: end;
+      min-height: 48px;
+      padding: 0 20px;
+      border: 0;
+      border-radius: 10px;
+      background: #354b2c;
+      color: #fff;
+      cursor: pointer;
+      font: inherit;
+      font-weight: 700;
+      transition: background 150ms ease, transform 150ms ease;
+    }
+
+    button:hover {
+      background: #263a20;
+    }
+
+    button:active {
+      transform: translateY(1px);
+    }
+
+    .list-heading {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      margin: 36px 0 12px;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 1.05rem;
+    }
+
+    #group-count {
+      color: #798074;
+      font-size: 0.85rem;
+    }
+
+    #groups {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .group-card,
+    #empty-state {
+      padding: 13px 15px;
+      border: 1px solid #ecebe5;
+      border-radius: 10px;
+      background: #faf9f5;
+    }
+
+    #empty-state {
+      margin: 0;
+      color: #7b8077;
+      font-size: 0.92rem;
+    }
+
+    .group-card summary {
+      cursor: pointer;
+    }
+
+    .group-card h3 {
+      display: inline;
+      margin: 0;
+      font-size: 1rem;
+    }
+
+    .group-content {
+      padding-top: 12px;
+    }
+
+    .people-list {
+      display: grid;
+      gap: 6px;
+      margin: 0 0 12px;
+      padding-left: 20px;
+      color: #596154;
+    }
+
+    .people-empty {
+      margin: 0 0 12px;
+      color: #7b8077;
+      font-size: 0.9rem;
+    }
+
+    .people-form {
+      display: flex;
+      gap: 8px;
+    }
+
+    .people-form input {
+      min-height: 42px;
+    }
+
+    .people-form button {
+      min-height: 42px;
+      padding: 0 14px;
+      font-size: 0.9rem;
+    }
+
+    @media (max-width: 480px) {
+      form {
+        flex-direction: column;
+      }
+
+      button {
+        width: 100%;
+      }
+
+      .people-form {
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">Eventov</p>
+    <h1>Bring your group together.</h1>
+    <p class="intro">Start a list for your event. Add group names below and keep everyone in one place.</p>
+
+    <form id="group-form">
+      <div class="field">
+        <label for="group-name">Group name</label>
+        <input id="group-name" name="group-name" type="text" maxlength="80" placeholder="e.g. The Weekend Crew" autocomplete="off" required>
+      </div>
+      <button type="submit">Add group</button>
+    </form>
+
+    <section aria-labelledby="groups-heading">
+      <div class="list-heading">
+        <h2 id="groups-heading">Your groups</h2>
+        <span id="group-count" aria-live="polite">0 groups</span>
+      </div>
+      <p id="empty-state">Your groups will appear here.</p>
+      <ul id="groups"></ul>
+    </section>
+  </main>
+
+  <script>
+    const form = document.querySelector("#group-form");
+    const nameInput = document.querySelector("#group-name");
+    const groupsList = document.querySelector("#groups");
+    const emptyState = document.querySelector("#empty-state");
+    const groupCount = document.querySelector("#group-count");
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const name = nameInput.value.trim();
+      if (!name) return;
+
+      const item = document.createElement("li");
+      item.className = "group-card";
+
+      const details = document.createElement("details");
+      details.open = true;
+
+      const summary = document.createElement("summary");
+      const heading = document.createElement("h3");
+      heading.textContent = name;
+      summary.append(heading);
+
+      const content = document.createElement("div");
+      content.className = "group-content";
+
+      const peopleList = document.createElement("ul");
+      peopleList.className = "people-list";
+      peopleList.setAttribute("aria-label", `People in ${name}`);
+
+      const emptyPeople = document.createElement("p");
+      emptyPeople.className = "people-empty";
+      emptyPeople.textContent = "No people added yet.";
+
+      const peopleForm = document.createElement("form");
+      peopleForm.className = "people-form";
+
+      const peopleInput = document.createElement("input");
+      peopleInput.type = "text";
+      peopleInput.maxLength = 80;
+      peopleInput.placeholder = "Add a person's name";
+      peopleInput.setAttribute("aria-label", `Person's name for ${name}`);
+      peopleInput.autocomplete = "off";
+      peopleInput.required = true;
+
+      const addPersonButton = document.createElement("button");
+      addPersonButton.type = "submit";
+      addPersonButton.textContent = "Add person";
+
+      peopleForm.append(peopleInput, addPersonButton);
+      content.append(peopleList, emptyPeople, peopleForm);
+      details.append(summary, content);
+      item.append(details);
+      groupsList.append(item);
+      emptyState.hidden = true;
+
+      const count = groupsList.children.length;
+      groupCount.textContent = `${count} ${count === 1 ? "group" : "groups"}`;
+      form.reset();
+      nameInput.focus();
+    });
+
+    groupsList.addEventListener("submit", (event) => {
+      if (!(event.target instanceof HTMLFormElement)) return;
+      event.preventDefault();
+
+      const peopleForm = event.target;
+      const peopleInput = peopleForm.querySelector("input");
+      const name = peopleInput.value.trim();
+      if (!name) return;
+
+      const group = peopleForm.closest(".group-card");
+      const peopleList = group.querySelector(".people-list");
+      const person = document.createElement("li");
+      person.textContent = name;
+      peopleList.append(person);
+      group.querySelector(".people-empty").hidden = true;
+      peopleForm.reset();
+      peopleInput.focus();
+    });
+  </script>
+</body>
+</html>
