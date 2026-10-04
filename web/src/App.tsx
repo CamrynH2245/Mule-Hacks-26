@@ -1,11 +1,57 @@
 import { useState, type FormEvent } from 'react'
 import { NavLink, Route, Routes } from 'react-router-dom'
 
+type Profile = {
+  name: string
+  birthdate: string
+  email: string
+  phone: string
+}
+
+const profileStorageKey = 'mule-hacks-profile'
+const emptyProfile: Profile = { name: '', birthdate: '', email: '', phone: '' }
+
+function readSavedProfile(): { profile: Profile; error: string } {
+  try {
+    const savedProfile = localStorage.getItem(profileStorageKey)
+    if (!savedProfile) return { profile: emptyProfile, error: '' }
+
+    const parsed: unknown = JSON.parse(savedProfile)
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      !('name' in parsed) ||
+      !('birthdate' in parsed) ||
+      !('email' in parsed) ||
+      !('phone' in parsed) ||
+      typeof parsed.name !== 'string' ||
+      typeof parsed.birthdate !== 'string' ||
+      typeof parsed.email !== 'string' ||
+      typeof parsed.phone !== 'string'
+    ) {
+      return { profile: emptyProfile, error: 'The saved profile is invalid. Please enter your details again.' }
+    }
+
+    return {
+      profile: {
+        name: parsed.name,
+        birthdate: parsed.birthdate,
+        email: parsed.email,
+        phone: parsed.phone,
+      },
+      error: '',
+    }
+  } catch {
+    return { profile: emptyProfile, error: 'The saved profile could not be loaded. Please enter your details again.' }
+  }
+}
+
 const pages = [
   { path: '/', label: 'Dashboard', desc: 'Event overview.' },
   { path: '/teams', label: 'Teams', desc: 'Define and manage teams.' },
   { path: '/rooms', label: 'Rooms', desc: 'Assign teams to rooms.' },
   { path: '/mentors', label: 'Mentors', desc: 'Track mentor locations.' },
+  { path: '/profile', label: 'Profile', desc: 'Edit your account details and contact information.' },
 ]
 
 function Page({ title, desc }: { title: string; desc: string }) {
@@ -17,7 +63,99 @@ function Page({ title, desc }: { title: string; desc: string }) {
   )
 }
 
-function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
+function ProfilePage({
+  profile,
+  error,
+  onSave,
+}: {
+  profile: Profile
+  error: string
+  onSave: (profile: Profile) => void
+}) {
+  const [formProfile, setFormProfile] = useState(profile)
+  const [saved, setSaved] = useState(false)
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    onSave(formProfile)
+    setSaved(true)
+  }
+
+  return (
+    <section className="profile-page">
+      <div className="profile-heading">
+        <p className="eyebrow">YOUR ACCOUNT</p>
+        <h1>Profile</h1>
+        <p>Manage your personal details and contact information.</p>
+      </div>
+      <form className="profile-form" onSubmit={handleSubmit}>
+        <div className="profile-form-grid">
+          <label>
+            Full name
+            <input
+              type="text"
+              autoComplete="name"
+              value={formProfile.name}
+              onChange={(event) => {
+                setFormProfile({ ...formProfile, name: event.target.value })
+                setSaved(false)
+              }}
+              required
+            />
+          </label>
+          <label>
+            Birthdate
+            <input
+              type="date"
+              autoComplete="bday"
+              value={formProfile.birthdate}
+              onChange={(event) => {
+                setFormProfile({ ...formProfile, birthdate: event.target.value })
+                setSaved(false)
+              }}
+            />
+          </label>
+          <label>
+            Email address
+            <input
+              type="email"
+              autoComplete="email"
+              value={formProfile.email}
+              onChange={(event) => {
+                setFormProfile({ ...formProfile, email: event.target.value })
+                setSaved(false)
+              }}
+              required
+            />
+          </label>
+          <label>
+            Phone number
+            <input
+              type="tel"
+              autoComplete="tel"
+              value={formProfile.phone}
+              onChange={(event) => {
+                setFormProfile({ ...formProfile, phone: event.target.value })
+                setSaved(false)
+              }}
+            />
+          </label>
+        </div>
+        {error && <p className="profile-message profile-error" role="alert">{error}</p>}
+        {saved && !error && <p className="profile-message" role="status">Profile saved.</p>}
+        <button className="profile-save" type="submit">Save changes</button>
+      </form>
+    </section>
+  )
+}
+
+function AuthScreen({
+  profile,
+  onAuthenticated,
+}: {
+  profile: Profile
+  onAuthenticated: (profile: Profile) => void
+}) {
   const [isSignUp, setIsSignUp] = useState(false)
   const [error, setError] = useState('')
 
@@ -33,7 +171,11 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
     }
 
     setError('')
-    onAuthenticated()
+    onAuthenticated({
+      ...(isSignUp ? emptyProfile : profile),
+      name: isSignUp ? String(formData.get('name')) : profile.name,
+      email: String(formData.get('email')),
+    })
   }
 
   return (
@@ -162,9 +304,30 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [savedProfile] = useState(readSavedProfile)
+  const [profile, setProfile] = useState(savedProfile.profile)
+  const [profileError, setProfileError] = useState(savedProfile.error)
+
+  function persistProfile(nextProfile: Profile) {
+    try {
+      localStorage.setItem(profileStorageKey, JSON.stringify(nextProfile))
+      setProfile(nextProfile)
+      setProfileError('')
+    } catch {
+      setProfileError('Your profile could not be saved. Check your browser storage settings and try again.')
+    }
+  }
 
   if (!isAuthenticated) {
-    return <AuthScreen onAuthenticated={() => setIsAuthenticated(true)} />
+    return (
+      <AuthScreen
+        profile={profile}
+        onAuthenticated={(authenticatedProfile) => {
+          persistProfile(authenticatedProfile)
+          setIsAuthenticated(true)
+        }}
+      />
+    )
   }
 
   return (
@@ -185,7 +348,13 @@ export default function App() {
       <main className="content">
         <Routes>
           {pages.map((p) => (
-            <Route key={p.path} path={p.path} element={<Page title={p.label} desc={p.desc} />} />
+            <Route
+              key={p.path}
+              path={p.path}
+              element={p.path === '/profile'
+                ? <ProfilePage profile={profile} error={profileError} onSave={persistProfile} />
+                : <Page title={p.label} desc={p.desc} />}
+            />
           ))}
           <Route path="*" element={<Page title="Not found" desc="That page doesn't exist." />} />
         </Routes>

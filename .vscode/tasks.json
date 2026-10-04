@@ -1,0 +1,21 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Start Mule Hacks web app",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"--prefix",
+				"web",
+				"run",
+				"dev",
+				"--",
+				"--host",
+				"127.0.0.1"
+			],
+			"isBackground": true,
+			"problemMatcher": []
+		}
+	]
+}
