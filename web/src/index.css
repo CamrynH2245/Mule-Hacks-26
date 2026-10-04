@@ -132,8 +132,6 @@ h1 { margin-bottom: 8px; font: 600 32px/1.2 system-ui, sans-serif; letter-spacin
 .team-edit-form { display: grid; gap: 10px; margin: 0; padding: 0; border: 0; background: transparent; }
 .team-manage-invite { display: grid; gap: 7px; }
 .team-manage-invite label { display: grid; gap: 6px; color: #555a63; font-size: 11px; font-weight: 600; }
-.mentor-description-field { display: grid; gap: 7px; margin-top: 10px; }
-.mentor-description-field label { display: block; color: #4c515a; font-size: 12px; font-weight: 600; }
 .text-button { justify-self: start; padding: 2px 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: 11px; text-decoration: underline; cursor: pointer; }
 .management-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(245px, 1fr)); gap: 14px; }
 .management-card { min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
@@ -170,10 +168,8 @@ h1 { margin-bottom: 8px; font: 600 32px/1.2 system-ui, sans-serif; letter-spacin
 .field-error { margin: 0; color: #b43e24; font-size: 11px; }
 .team-assignment { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: 7px; }
 .team-assignment legend { padding: 0 5px; color: #575c65; font-size: 11px; font-weight: 600; }
-.checkbox-field { display: inline-flex; align-items: center; gap: 8px; color: #555a63; font-size: 11px; font-weight: 500; cursor: pointer; }
-.checkbox-field input { width: 12px; min-width: 12px; height: 12px; min-height: 12px; margin: 0; accent-color: var(--accent); }
 .checkbox-label { display: inline-flex !important; grid-template-columns: auto 1fr !important; align-items: center; gap: 7px !important; padding: 6px 8px; border: 1px solid #e8e9ed; border-radius: 5px; color: #555a63 !important; font-size: 11px !important; font-weight: 500 !important; cursor: pointer; }
-.checkbox-label input { width: 12px; min-height: 12px; height: 12px; margin: 0; accent-color: var(--accent); }
+.checkbox-label input { width: 14px; min-height: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
 .form-hint { align-self: center; margin: 0; color: var(--muted); font-size: 11px; font-weight: 400; }
 .room-assignment { margin-top: 17px; }
 .mentor-card .resource-icon { margin-bottom: 12px; }

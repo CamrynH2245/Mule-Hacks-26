@@ -137,7 +137,7 @@ type Team = {
   directChats?: TeamDirectChat[]
 }
 type Room = { id: string; name: string; teamIds: string[] }
-type Mentor = { id: string; name: string; email: string; specialty: string; description?: string }
+type Mentor = { id: string; name: string; email: string; specialty: string }
 
 function isTeam(value: unknown): value is Team {
   if (typeof value !== 'object' || value === null) return false
@@ -173,8 +173,7 @@ function isMentor(value: unknown): value is Mentor {
   return typeof mentor.id === 'string' &&
     typeof mentor.name === 'string' &&
     typeof mentor.email === 'string' &&
-    typeof mentor.specialty === 'string' &&
-    (!('description' in mentor) || typeof mentor.description === 'string')
+    typeof mentor.specialty === 'string'
 }
 
 const storageKey = 'mule-hacks-events'
@@ -283,7 +282,7 @@ function loadEvents(currentEmail: string): { events: HackathonEvent[]; error: st
         : []
       const rooms = Array.isArray(event.rooms)
         ? event.rooms.filter(isRoom).map((room) => {
-          const teamIds = room.teamIds.filter((teamId) => teams.some((team) => team.id === teamId))
+          const teamIds = room.teamIds.filter((teamId) => teams.some((team) => team.id === teamId)).slice(0, 1)
           if (JSON.stringify(teamIds) !== JSON.stringify(room.teamIds)) needsStorageUpdate = true
           return { ...room, teamIds }
         })
@@ -853,13 +852,9 @@ function EventResources({
   const [name, setName] = useState('')
   const [teamLimitError, setTeamLimitError] = useState('')
   const [assignedTeamCreatorEmail, setAssignedTeamCreatorEmail] = useState('')
-  const [autoJoinCreator, setAutoJoinCreator] = useState(true)
   const [email, setEmail] = useState('')
   const [specialty, setSpecialty] = useState('')
-  const [description, setDescription] = useState('')
   const [managedTeamId, setManagedTeamId] = useState<string | null>(null)
-  const [editingMentorId, setEditingMentorId] = useState<string | null>(null)
-  const [mentorDescriptionDraft, setMentorDescriptionDraft] = useState('')
   const [addTeamOpen, setAddTeamOpen] = useState(false)
   const [editingTeamId, setEditingTeamId] = useState<string | null>(null)
   const [teamNameDraft, setTeamNameDraft] = useState('')
@@ -884,17 +879,16 @@ function EventResources({
     const teamName = name.trim()
     if (!teamName) return
     const creatorEmail = isEventCreator
-      ? normalizeEmail(assignedTeamCreatorEmail || currentEmail)
+      ? normalizeEmail(assignedTeamCreatorEmail)
       : normalizedCurrentEmail
     const creatorProfile = isEventCreator
       ? eligibleTeamCreators.find((candidate) => normalizeEmail(candidate.email) === creatorEmail)
-        ?? profiles.find((candidate) => normalizeEmail(candidate.email) === creatorEmail)
       : profiles.find((candidate) => normalizeEmail(candidate.email) === creatorEmail)
-    if (!creatorEmail) {
-      setTeamLimitError('Choose a valid team creator or leave this blank to create the team as yourself.')
+    if (!creatorEmail || (isEventCreator && !creatorProfile)) {
+      setTeamLimitError('Select an eligible event member to be the team creator.')
       return
     }
-    if (autoJoinCreator && countMemberTeams(event, creatorEmail) + countPendingTeamInvites(event, creatorEmail) >= event.maxTeamsPerPerson) {
+    if (countMemberTeams(event, creatorEmail) + countPendingTeamInvites(event, creatorEmail) >= event.maxTeamsPerPerson) {
       setTeamLimitError(`${creatorProfile?.name ?? creatorEmail} has reached the limit of ${event.maxTeamsPerPerson} team${event.maxTeamsPerPerson === 1 ? '' : 's'} per person for this event.`)
       return
     }
@@ -903,16 +897,13 @@ function EventResources({
     do {
       teamCode = createJoinCode()
     } while (existingTeamCodes.has(teamCode))
-    const creatorMember = autoJoinCreator
-      ? [{ email: creatorEmail, name: creatorProfile?.name ?? creatorEmail, role: 'Creator' }]
-      : []
     const saved = onUpdate((current) => ({
       ...current,
       teams: [...current.teams, {
         id: crypto.randomUUID(),
         name: teamName,
         teamCode,
-        members: creatorMember,
+        members: [{ email: creatorEmail, name: creatorProfile?.name ?? creatorEmail, role: 'Creator' }],
         createdByEmail: creatorEmail,
       }],
     }))
@@ -924,7 +915,6 @@ function EventResources({
     setName('')
     setTeamLimitError('')
     setAssignedTeamCreatorEmail('')
-    setAutoJoinCreator(true)
     setAddTeamOpen(false)
     setTeamManagementFeedback('Team added.')
   }
@@ -1109,9 +1099,9 @@ function EventResources({
       rooms: current.rooms.map((room) => {
         if (room.id !== roomId) return room
         if (claim) {
-          return room.teamIds.includes(teamId)
-            ? room
-            : { ...room, teamIds: [...room.teamIds, teamId] }
+          return room.teamIds.length === 0 || room.teamIds.includes(teamId)
+            ? { ...room, teamIds: [teamId] }
+            : room
         }
         return { ...room, teamIds: room.teamIds.filter((claimedTeamId) => claimedTeamId !== teamId) }
       }),
@@ -1124,30 +1114,11 @@ function EventResources({
     if (!mentorName) return
     onUpdate((current) => ({
       ...current,
-      mentors: [...current.mentors, {
-        id: crypto.randomUUID(),
-        name: mentorName,
-        email: email.trim(),
-        specialty: specialty.trim(),
-        description: description.trim(),
-      }],
+      mentors: [...current.mentors, { id: crypto.randomUUID(), name: mentorName, email: email.trim(), specialty: specialty.trim() }],
     }))
     setName('')
     setEmail('')
     setSpecialty('')
-    setDescription('')
-  }
-
-  function updateMentorDescription(mentorId: string, nextDescription: string) {
-    const trimmed = nextDescription.trim()
-    onUpdate((current) => ({
-      ...current,
-      mentors: current.mentors.map((mentor) => mentor.id === mentorId
-        ? { ...mentor, description: trimmed }
-        : mentor),
-    }))
-    setEditingMentorId(null)
-    setMentorDescriptionDraft('')
   }
 
   if (section === 'teams') {
@@ -1168,14 +1139,6 @@ function EventResources({
             <h2>Add a team</h2>
             <p className="form-hint">Each team can have up to {event.maxTeamMembers} members; each person can belong to up to {event.maxTeamsPerPerson} team{event.maxTeamsPerPerson === 1 ? '' : 's'} in this event.</p>
             <label>Team name<input required value={name} onChange={(input) => setName(input.target.value)} placeholder="e.g. Team Comet" /></label>
-            <label className="checkbox-field">
-              <input
-                type="checkbox"
-                checked={autoJoinCreator}
-                onChange={(input) => setAutoJoinCreator(input.target.checked)}
-              />
-              Automatically add the creator as a member of this team
-            </label>
             {teamLimitError && <p className="field-error" role="alert">{teamLimitError}</p>}
             <button className="button button-primary" type="submit">Add team</button>
           </form>
@@ -1184,29 +1147,21 @@ function EventResources({
           <div className="team-management-panel">
             <form className="event-form inline-form" onSubmit={addTeam}>
               <h3>Add a team</h3>
-                <p className="form-hint">Optionally assign another event member as the team creator. Leave this blank to create the team as yourself.</p>
+                <p className="form-hint">Assign another event member as the team creator. You will not be added to this team.</p>
                 <p className="form-hint">Each team can have up to {event.maxTeamMembers} members; each person can belong to up to {event.maxTeamsPerPerson} team{event.maxTeamsPerPerson === 1 ? '' : 's'} in this event.</p>
                 <label>Team name<input required value={name} onChange={(input) => setName(input.target.value)} placeholder="e.g. Team Comet" /></label>
                 <label>Team creator
-                  <select value={assignedTeamCreatorEmail} onChange={(input) => setAssignedTeamCreatorEmail(input.target.value)}>
-                    <option value="">Create as yourself</option>
+                  <select required value={assignedTeamCreatorEmail} onChange={(input) => setAssignedTeamCreatorEmail(input.target.value)} disabled={!eligibleTeamCreators.length}>
+                    <option value="">Select an event member</option>
                     {eligibleTeamCreators.map((candidate) => (
                       <option key={candidate.email} value={normalizeEmail(candidate.email)}>{candidate.name} ({candidate.email})</option>
                     ))}
                   </select>
                 </label>
-                <label className="checkbox-field">
-                  <input
-                    type="checkbox"
-                    checked={autoJoinCreator}
-                    onChange={(input) => setAutoJoinCreator(input.target.checked)}
-                  />
-                  Automatically add the creator as a member of this team
-                </label>
-                {!eligibleTeamCreators.length && <p className="form-hint">No other event members are currently eligible to create a team, but you can still create one as yourself.</p>}
+                {!eligibleTeamCreators.length && <p className="form-hint">No other event members are currently eligible to create a team. Invite someone to the event or adjust the team limit.</p>}
                 {teamLimitError && <p className="field-error" role="alert">{teamLimitError}</p>}
                 <div className="management-actions">
-                  <button className="button button-primary" type="submit">Add team</button>
+                  <button className="button button-primary" type="submit" disabled={!eligibleTeamCreators.length}>Add team</button>
                 <button className="button button-secondary" type="button" onClick={() => setAddTeamOpen(false)}>Cancel</button>
               </div>
             </form>
@@ -1357,35 +1312,30 @@ function EventResources({
         {isEventCreator ? (
           <form className="event-form inline-form" onSubmit={addRoom}>
             <h2>List a room or workspace</h2>
-            <p className="form-hint">Teams can claim available spaces here. Multiple teams can share the same room.</p>
+            <p className="form-hint">Teams can claim available spaces here. Each space can be claimed by one team.</p>
             <label>Room or workspace name<input required value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Room 101 or Design Lab" /></label>
             <button className="button button-primary" type="submit">Add space</button>
           </form>
-        ) : <p className="form-hint">Claim a space for one of your teams.</p>}
+        ) : <p className="form-hint">Claim an available space for one of your teams.</p>}
         <div className="section-heading"><div><h2>Rooms</h2><p>{event.rooms.length} room{event.rooms.length === 1 ? '' : 's'}</p></div></div>
         {event.rooms.length ? (
           <div className="management-grid">
             {event.rooms.map((room) => {
-              const claimedTeams = event.teams.filter((team) => room.teamIds.includes(team.id))
-              const availableClaimableTeams = claimableTeams.filter((team) => !room.teamIds.includes(team.id))
+              const claimedTeamId = room.teamIds[0]
+              const claimedTeam = event.teams.find((team) => team.id === claimedTeamId)
+              const userCanManageClaim = claimableTeams.some((team) => team.id === claimedTeamId)
               return (
                 <article className="management-card" key={room.id}>
-                  <div className="management-card-heading"><span className="resource-icon" aria-hidden="true">⌂</span><div><h3>{room.name}</h3><p>{claimedTeams.length ? `Claimed by ${claimedTeams.map((team) => team.name).join(', ')}` : 'Available to claim'}</p></div></div>
-                  {availableClaimableTeams.length > 0 && (
+                  <div className="management-card-heading"><span className="resource-icon" aria-hidden="true">⌂</span><div><h3>{room.name}</h3><p>{claimedTeam ? `Claimed by ${claimedTeam.name}` : 'Available to claim'}</p></div></div>
+                  {!claimedTeamId && claimableTeams.length > 0 && (
                     <div className="room-claim-actions">
-                      {availableClaimableTeams.map((team) => (
+                      {claimableTeams.map((team) => (
                         <button className="button button-primary" key={team.id} type="button" onClick={() => updateRoomClaim(room.id, team.id, true)}>Claim for {team.name}</button>
                       ))}
                     </div>
                   )}
-                  {claimedTeams.some((team) => claimableTeams.some((claimableTeam) => claimableTeam.id === team.id)) && (
-                    <div className="room-claim-actions">
-                      {claimedTeams
-                        .filter((team) => claimableTeams.some((claimableTeam) => claimableTeam.id === team.id))
-                        .map((team) => (
-                          <button className="button button-secondary" key={team.id} type="button" onClick={() => updateRoomClaim(room.id, team.id, false)}>Release {team.name}</button>
-                        ))}
-                    </div>
+                  {claimedTeamId && userCanManageClaim && (
+                    <button className="button button-secondary" type="button" onClick={() => updateRoomClaim(room.id, claimedTeamId, false)}>Release space</button>
                   )}
                   {isEventCreator && <button className="member-remove" type="button" onClick={() => removeRoom(room.id)}>Remove space</button>}
                 </article>
@@ -1407,10 +1357,6 @@ function EventResources({
           <label>Email (optional)<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="mentor@example.com" /></label>
         </div>
         <label>Expertise (optional)<input value={specialty} onChange={(event) => setSpecialty(event.target.value)} placeholder="e.g. Product design" /></label>
-        <div className="mentor-description-field">
-          <label>Description (optional)</label>
-          <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={4} placeholder="Add guidance, availability, or notes for this mentor." />
-        </div>
         <button className="button button-primary" type="submit">Add mentor</button>
       </form>
       <div className="section-heading"><div><h2>Mentors</h2><p>{event.mentors.length} mentor{event.mentors.length === 1 ? '' : 's'}</p></div></div>
@@ -1422,29 +1368,6 @@ function EventResources({
               <h3>{mentor.name}</h3>
               {mentor.email && <p>{mentor.email}</p>}
               {mentor.specialty && <span className="mentor-specialty">{mentor.specialty}</span>}
-              {editingMentorId === mentor.id ? (
-                <div className="mentor-edit-panel">
-                  <div className="mentor-description-field">
-                    <label>Description</label>
-                    <textarea value={mentorDescriptionDraft} onChange={(event) => setMentorDescriptionDraft(event.target.value)} rows={4} />
-                  </div>
-                  <div className="management-actions">
-                    <button className="button button-primary" type="button" onClick={() => updateMentorDescription(mentor.id, mentorDescriptionDraft)}>Save</button>
-                    <button className="button button-secondary" type="button" onClick={() => {
-                      setEditingMentorId(null)
-                      setMentorDescriptionDraft('')
-                    }}>Cancel</button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  {mentor.description ? <p>{mentor.description}</p> : <p className="form-hint">No description yet.</p>}
-                  <button className="button button-secondary" type="button" onClick={() => {
-                    setEditingMentorId(mentor.id)
-                    setMentorDescriptionDraft(mentor.description ?? '')
-                  }}>Edit description</button>
-                </>
-              )}
             </article>
           ))}
         </div>
@@ -1664,7 +1587,7 @@ function AuthScreen({
           <p className="eyebrow">{isSignUp ? 'JOIN YOUR EVENT TEAM' : 'WELCOME BACK'}</p>
           <h1 id="auth-title">{isSignUp ? 'Create your account' : 'Sign in to your account'}</h1>
           <p className="auth-subtitle">
-            {isSignUp ? 'Get started managing your event.' : 'Manage your events, all in one place.'}
+            {isSignUp ? 'Get started managing your Mule Hacks event.' : 'Manage your Mule Hacks event, all in one place.'}
           </p>
         </div>
         <div className="auth-tabs" role="tablist" aria-label="Account options">
