@@ -9,9 +9,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg'],
       manifest: {
-        name: 'Mule Hacks Admin',
-        short_name: 'MuleHacks',
-        description: 'Manage hackathon teams, rooms, and mentors',
+        name: 'Event Hosting',
+        short_name: 'Event Hosting',
+        description: 'Create events and manage teams, rooms, and mentors',
         theme_color: '#1e293b',
         background_color: '#ffffff',
         display: 'standalone',
