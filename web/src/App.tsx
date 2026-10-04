@@ -113,12 +113,15 @@ type HackathonEvent = {
   name: string
   date: string
   location: string
+  joinCode: string
+  memberEmails: string[]
   teams: Team[]
   rooms: Room[]
   mentors: Mentor[]
 }
 
-type Team = { id: string; name: string; members: string[] }
+type TeamMember = { email: string; name: string }
+type Team = { id: string; name: string; teamCode: string; members: TeamMember[]; createdByEmail?: string }
 type Room = { id: string; name: string; teamIds: string[] }
 type Mentor = { id: string; name: string; email: string; specialty: string }
 
@@ -127,8 +130,14 @@ function isTeam(value: unknown): value is Team {
   const team = value as Record<string, unknown>
   return typeof team.id === 'string' &&
     typeof team.name === 'string' &&
+    (!('teamCode' in team) || typeof team.teamCode === 'string') &&
+    (!('createdByEmail' in team) || typeof team.createdByEmail === 'string') &&
     Array.isArray(team.members) &&
-    team.members.every((member: unknown) => typeof member === 'string')
+    team.members.every((member: unknown) =>
+      typeof member === 'string' ||
+      (typeof member === 'object' && member !== null &&
+        'email' in member && typeof member.email === 'string' &&
+        'name' in member && typeof member.name === 'string'))
 }
 
 function isRoom(value: unknown): value is Room {
@@ -150,33 +159,85 @@ function isMentor(value: unknown): value is Mentor {
 }
 
 const storageKey = 'mule-hacks-events'
+const joinCodeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 const sections = [
   { slug: 'teams', label: 'Teams', description: 'Create and manage teams for this event.' },
   { slug: 'rooms', label: 'Rooms', description: 'Set up rooms and assign teams for this event.' },
   { slug: 'mentors', label: 'Mentors', description: 'Track mentor locations and assignments for this event.' },
 ]
 
-function loadEvents(): { events: HackathonEvent[]; error: string } {
+function createJoinCode(): string {
+  const values = crypto.getRandomValues(new Uint8Array(8))
+  return Array.from(values, (value) => joinCodeAlphabet[value % joinCodeAlphabet.length]).join('')
+}
+
+function loadEvents(currentEmail: string): { events: HackathonEvent[]; error: string } {
   try {
     const savedEvents: unknown = JSON.parse(localStorage.getItem(storageKey) ?? '[]')
     if (!Array.isArray(savedEvents)) {
       return { events: [], error: 'Saved events could not be loaded because the stored data is invalid.' }
     }
-    const events = savedEvents.filter(
+    const validEvents = savedEvents.filter(
       (event): event is Record<string, unknown> & { id: string; name: string; date: string; location: string } =>
         typeof event?.id === 'string' &&
         typeof event?.name === 'string' &&
         typeof event?.date === 'string' &&
         typeof event?.location === 'string',
-    ).map((event): HackathonEvent => ({
-      id: event.id,
-      name: event.name,
-      date: event.date,
-      location: event.location,
-      teams: Array.isArray(event.teams) ? event.teams.filter(isTeam) : [],
-      rooms: Array.isArray(event.rooms) ? event.rooms.filter(isRoom) : [],
-      mentors: Array.isArray(event.mentors) ? event.mentors.filter(isMentor) : [],
-    }))
+    )
+    const usedCodes = new Set<string>()
+    const usedTeamCodes = new Set<string>()
+    let needsStorageUpdate = false
+    const events = validEvents.map((event): HackathonEvent => {
+      const storedCode = typeof event.joinCode === 'string' ? event.joinCode.toUpperCase() : ''
+      let joinCode = storedCode
+      if (!/^[A-Z2-9]{8}$/.test(joinCode) || usedCodes.has(joinCode)) {
+        do {
+          joinCode = createJoinCode()
+        } while (usedCodes.has(joinCode))
+      }
+      usedCodes.add(joinCode)
+      if (joinCode !== event.joinCode || !Array.isArray(event.memberEmails)) {
+        needsStorageUpdate = true
+      }
+      const teams = Array.isArray(event.teams)
+        ? event.teams.filter(isTeam).map((team) => {
+          let teamCode = typeof team.teamCode === 'string' ? team.teamCode.toUpperCase() : ''
+          if (!/^[A-Z2-9]{8}$/.test(teamCode) || usedTeamCodes.has(teamCode)) {
+            do {
+              teamCode = createJoinCode()
+            } while (usedTeamCodes.has(teamCode))
+          }
+          usedTeamCodes.add(teamCode)
+          if (teamCode !== team.teamCode || team.members.some((member) => typeof member === 'string')) {
+            needsStorageUpdate = true
+          }
+          return {
+            ...team,
+            teamCode,
+            members: team.members.map((member) =>
+              typeof member === 'string'
+                ? { email: '', name: member }
+                : { ...member, email: normalizeEmail(member.email) }),
+          }
+        })
+        : []
+      return {
+        id: event.id,
+        name: event.name,
+        date: event.date,
+        location: event.location,
+        joinCode,
+        memberEmails: Array.isArray(event.memberEmails)
+          ? event.memberEmails.filter((email): email is string => typeof email === 'string').map(normalizeEmail)
+          : [normalizeEmail(currentEmail)],
+        teams,
+        rooms: Array.isArray(event.rooms) ? event.rooms.filter(isRoom) : [],
+        mentors: Array.isArray(event.mentors) ? event.mentors.filter(isMentor) : [],
+      }
+    })
+    if (needsStorageUpdate) {
+      localStorage.setItem(storageKey, JSON.stringify(events))
+    }
     return {
       events,
       error: events.length === savedEvents.length ? '' : 'Some saved events could not be loaded because their data is invalid.',
@@ -189,14 +250,18 @@ function loadEvents(): { events: HackathonEvent[]; error: string } {
 function Dashboard({
   events,
   onCreateEvent,
+  onJoinEvent,
 }: {
   events: HackathonEvent[]
-  onCreateEvent: (event: Omit<HackathonEvent, 'id' | 'teams' | 'rooms' | 'mentors'>) => void
+  onCreateEvent: (event: Omit<HackathonEvent, 'id' | 'joinCode' | 'memberEmails' | 'teams' | 'rooms' | 'mentors'>) => void
+  onJoinEvent: (code: string) => boolean
 }) {
   const [formOpen, setFormOpen] = useState(false)
+  const [joinFormOpen, setJoinFormOpen] = useState(false)
   const [name, setName] = useState('')
   const [date, setDate] = useState('')
   const [location, setLocation] = useState('')
+  const [joinCode, setJoinCode] = useState('')
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -207,6 +272,14 @@ function Dashboard({
     setFormOpen(false)
   }
 
+  function handleJoin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (onJoinEvent(joinCode)) {
+      setJoinCode('')
+      setJoinFormOpen(false)
+    }
+  }
+
   return (
     <section className="dashboard">
       <div className="page-heading">
@@ -215,10 +288,35 @@ function Dashboard({
           <h1>Dashboard</h1>
           <p className="page-description">Create and manage your hackathon events.</p>
         </div>
-        <button className="button button-primary" onClick={() => setFormOpen(!formOpen)}>
-          {formOpen ? 'Cancel' : '+ Add event'}
-        </button>
+        <div className="dashboard-actions">
+          <button className="button button-secondary" type="button" onClick={() => setJoinFormOpen(!joinFormOpen)}>
+            {joinFormOpen ? 'Cancel' : 'Join with code'}
+          </button>
+          <button className="button button-primary" type="button" onClick={() => setFormOpen(!formOpen)}>
+            {formOpen ? 'Cancel' : '+ Add event'}
+          </button>
+        </div>
       </div>
+
+      {joinFormOpen && (
+        <form className="event-form join-event-form" onSubmit={handleJoin}>
+          <h2>Join an existing event</h2>
+          <label>
+            Event code
+            <input
+              autoFocus
+              required
+              minLength={8}
+              maxLength={8}
+              autoCapitalize="characters"
+              value={joinCode}
+              onChange={(event) => setJoinCode(event.target.value.toUpperCase().replace(/[^A-Z2-9]/g, ''))}
+              placeholder="Enter the 8-character code"
+            />
+          </label>
+          <button className="button button-primary" type="submit">Join event</button>
+        </form>
+      )}
 
       {formOpen && (
         <form className="event-form" onSubmit={handleSubmit}>
@@ -255,6 +353,7 @@ function Dashboard({
               <span className="event-card-content">
                 <strong>{event.name}</strong>
                 <span>{[event.date, event.location].filter(Boolean).join(' · ') || 'Event workspace'}</span>
+                <span>Join code: <code>{event.joinCode}</code></span>
               </span>
               <span className="event-card-arrow" aria-hidden="true">→</span>
             </Link>
@@ -274,9 +373,15 @@ function Dashboard({
 
 function EventPage({
   event,
+  profiles,
+  currentEmail,
+  usedTeamCodes,
   onUpdate,
 }: {
   event: HackathonEvent
+  profiles: Profile[]
+  currentEmail: string
+  usedTeamCodes: string[]
   onUpdate: (update: (current: HackathonEvent) => HackathonEvent) => void
 }) {
   const { section } = useParams()
@@ -293,9 +398,14 @@ function EventPage({
             {activeSection?.description ?? ([event.date, event.location].filter(Boolean).join(' · ') || 'Manage this event and its resources.')}
           </p>
         </div>
+        <div className="event-join-code" aria-label={`Event join code ${event.joinCode}`}>
+          <span>Share this code to invite people to the event</span>
+          <code>{event.joinCode}</code>
+          <span>{event.memberEmails.length} member{event.memberEmails.length === 1 ? '' : 's'}</span>
+        </div>
       </div>
       {activeSection ? (
-        <EventResources event={event} section={activeSection.slug} onUpdate={onUpdate} />
+        <EventResources event={event} profiles={profiles} currentEmail={currentEmail} usedTeamCodes={usedTeamCodes} section={activeSection.slug} onUpdate={onUpdate} />
       ) : (
         <div className="section-heading">
           <div>
@@ -322,16 +432,20 @@ function EventPage({
 
 function EventResources({
   event,
+  profiles,
+  currentEmail,
+  usedTeamCodes,
   section,
   onUpdate,
 }: {
   event: HackathonEvent
+  profiles: Profile[]
+  currentEmail: string
+  usedTeamCodes: string[]
   section: string
   onUpdate: (update: (current: HackathonEvent) => HackathonEvent) => void
 }) {
   const [name, setName] = useState('')
-  const [memberNames, setMemberNames] = useState<Record<string, string>>({})
-  const [memberErrors, setMemberErrors] = useState<Record<string, string>>({})
   const [roomTeams, setRoomTeams] = useState<string[]>([])
   const [email, setEmail] = useState('')
   const [specialty, setSpecialty] = useState('')
@@ -340,26 +454,34 @@ function EventResources({
     eventForm.preventDefault()
     const teamName = name.trim()
     if (!teamName) return
+    const creatorEmail = normalizeEmail(currentEmail)
+    const creatorProfile = profiles.find((savedProfile) =>
+      normalizeEmail(savedProfile.email) === creatorEmail)
+    const existingTeamCodes = new Set(usedTeamCodes)
+    let teamCode: string
+    do {
+      teamCode = createJoinCode()
+    } while (existingTeamCodes.has(teamCode))
     onUpdate((current) => ({
       ...current,
-      teams: [...current.teams, { id: crypto.randomUUID(), name: teamName, members: [] }],
+      teams: [...current.teams, {
+        id: crypto.randomUUID(),
+        name: teamName,
+        teamCode,
+        members: [{ email: creatorEmail, name: creatorProfile?.name ?? creatorEmail }],
+        createdByEmail: creatorEmail,
+      }],
     }))
     setName('')
   }
 
-  function addMember(eventForm: FormEvent<HTMLFormElement>, teamId: string) {
-    eventForm.preventDefault()
-    const memberName = (memberNames[teamId] ?? '').trim()
-    if (!memberName) {
-      setMemberErrors((current) => ({ ...current, [teamId]: 'Enter a member name.' }))
-      return
-    }
+  function removeMember(teamId: string, memberEmail: string) {
     onUpdate((current) => ({
       ...current,
-      teams: current.teams.map((team) => team.id === teamId ? { ...team, members: [...team.members, memberName] } : team),
+      teams: current.teams.map((team) => team.id === teamId
+        ? { ...team, members: team.members.filter((member) => member.email !== memberEmail) }
+        : team),
     }))
-    setMemberNames((current) => ({ ...current, [teamId]: '' }))
-    setMemberErrors((current) => ({ ...current, [teamId]: '' }))
   }
 
   function addRoom(eventForm: FormEvent<HTMLFormElement>) {
@@ -401,19 +523,38 @@ function EventResources({
             {event.teams.map((team) => (
               <article className="management-card" key={team.id}>
                 <div className="management-card-heading"><span className="resource-icon" aria-hidden="true">◈</span><div><h3>{team.name}</h3><p>{team.members.length} member{team.members.length === 1 ? '' : 's'}</p></div></div>
-                {team.members.length > 0 && <ul className="member-list">{team.members.map((member, index) => <li key={`${team.id}-${index}`}>{member}</li>)}</ul>}
-                <form className="member-form" onSubmit={(eventForm) => addMember(eventForm, team.id)}>
-                  <label htmlFor={`member-${team.id}`}>Add a member</label>
-                  <div className="input-action">
-                    <input id={`member-${team.id}`} value={memberNames[team.id] ?? ''} onChange={(event) => setMemberNames((current) => ({ ...current, [team.id]: event.target.value }))} placeholder="Member name" />
-                    <button className="button button-secondary" type="submit">Add</button>
-                  </div>
-                  {memberErrors[team.id] && <p className="field-error" role="alert">{memberErrors[team.id]}</p>}
-                </form>
+                <div className="team-code-display">
+                  <span>Static team code · share to invite</span>
+                  <code>{team.teamCode}</code>
+                </div>
+                {team.members.length > 0 && (
+                  <ul className="member-list">{team.members.map((member, index) => {
+                    const currentProfile = profiles.find((savedProfile) =>
+                      member.email && normalizeEmail(savedProfile.email) === normalizeEmail(member.email))
+                    return (
+                      <li key={`${team.id}-${member.email || index}`}>
+                        <span>{currentProfile?.name ?? member.name}</span>
+                        {team.createdByEmail &&
+                          normalizeEmail(team.createdByEmail) === normalizeEmail(currentEmail) &&
+                          member.email &&
+                          normalizeEmail(member.email) !== normalizeEmail(currentEmail) && (
+                          <button
+                            className="member-remove"
+                            type="button"
+                            aria-label={`Remove ${currentProfile?.name ?? member.name} from ${team.name}`}
+                            onClick={() => removeMember(team.id, member.email)}
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </li>
+                    )
+                  })}</ul>
+                )}
               </article>
             ))}
           </div>
-        ) : <div className="empty-state compact-empty"><h3>No teams yet</h3><p>Add a team above, then add its members.</p></div>}
+        ) : <div className="empty-state compact-empty"><h3>No teams yet</h3><p>Add a team above, then share its code to invite members.</p></div>}
       </div>
     )
   }
@@ -703,26 +844,272 @@ function AuthScreen({
   )
 }
 
+function MyTeamsPage({
+  events,
+  email,
+  onJoinTeam,
+}: {
+  events: HackathonEvent[]
+  email: string
+  onJoinTeam: (code: string) => { eventId: string; teamId: string } | string
+}) {
+  const navigate = useNavigate()
+  const [teamCode, setTeamCode] = useState('')
+  const [joinError, setJoinError] = useState('')
+  const normalizedEmail = normalizeEmail(email)
+  const teams = events.flatMap((event) =>
+    event.teams
+      .filter((team) =>
+        normalizeEmail(team.createdByEmail ?? '') === normalizedEmail ||
+        team.members.some((member) => member.email && normalizeEmail(member.email) === normalizedEmail))
+      .map((team) => ({
+        team,
+        event,
+        createdByUser: normalizeEmail(team.createdByEmail ?? '') === normalizedEmail,
+      })))
+  const createdTeams = teams.filter((item) => item.createdByUser)
+  const joinedTeams = teams.filter((item) => !item.createdByUser)
+
+  function joinTeam(eventForm: FormEvent<HTMLFormElement>) {
+    eventForm.preventDefault()
+    const result = onJoinTeam(teamCode)
+    if (typeof result === 'string') {
+      setJoinError(result)
+      return
+    }
+    setJoinError('')
+    setTeamCode('')
+    navigate(`/my-teams/${result.eventId}/${result.teamId}`)
+  }
+
+  function renderTeams(items: typeof teams) {
+    if (!items.length) {
+      return <p className="teams-empty">No teams here yet.</p>
+    }
+    return (
+      <div className="my-teams-list">
+        {items.map(({ team, event }) => (
+          <Link className="my-team-card" key={`${event.id}-${team.id}`} to={`/my-teams/${event.id}/${team.id}`}>
+            <span className="my-team-icon" aria-hidden="true">◈</span>
+            <span className="my-team-details">
+              <strong>{team.name}</strong>
+              <span>{event.name} · {team.members.length} member{team.members.length === 1 ? '' : 's'}</span>
+            </span>
+            <span className="my-team-arrow" aria-hidden="true">→</span>
+          </Link>
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <section className="my-teams-page">
+      <div className="page-heading">
+        <div>
+          <p className="eyebrow">YOUR WORKSPACE</p>
+          <h1>My teams</h1>
+          <p className="page-description">Teams you created and teams you are a member of.</p>
+        </div>
+      </div>
+      <form className="event-form join-team-form" onSubmit={joinTeam}>
+        <h2>Join a team</h2>
+        <p>Enter the static team code shared by the team creator.</p>
+        <div className="input-action">
+          <input
+            aria-label="Team code"
+            autoComplete="off"
+            inputMode="text"
+            maxLength={8}
+            minLength={8}
+            onChange={(event) => setTeamCode(event.target.value.toUpperCase())}
+            pattern="[A-Z2-9]{8}"
+            placeholder="Enter team code"
+            required
+            title="Enter the 8-character team code."
+            value={teamCode}
+          />
+          <button className="button button-primary" type="submit">Join team</button>
+        </div>
+        {joinError && <p className="field-error" role="alert">{joinError}</p>}
+      </form>
+      <section className="my-teams-section">
+        <div className="section-heading">
+          <div>
+            <h2>Teams I created</h2>
+            <p>{createdTeams.length} team{createdTeams.length === 1 ? '' : 's'}</p>
+          </div>
+        </div>
+        {renderTeams(createdTeams)}
+      </section>
+      <section className="my-teams-section">
+        <div className="section-heading">
+          <div>
+            <h2>Teams I’m part of</h2>
+            <p>{joinedTeams.length} team{joinedTeams.length === 1 ? '' : 's'}</p>
+          </div>
+        </div>
+        {renderTeams(joinedTeams)}
+      </section>
+    </section>
+  )
+}
+
+function MyTeamDetailPage({
+  event,
+  team,
+  profiles,
+  currentEmail,
+  onUpdate,
+}: {
+  event: HackathonEvent
+  team: Team
+  profiles: Profile[]
+  currentEmail: string
+  onUpdate: (update: (current: HackathonEvent) => HackathonEvent) => void
+}) {
+  const isCreator = normalizeEmail(team.createdByEmail ?? '') === normalizeEmail(currentEmail)
+  const [name, setName] = useState(team.name)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+
+  function saveName(eventForm: FormEvent<HTMLFormElement>) {
+    eventForm.preventDefault()
+    const nextName = name.trim()
+    if (!nextName) {
+      setError('Enter a team name.')
+      return
+    }
+    onUpdate((current) => ({
+      ...current,
+      teams: current.teams.map((currentTeam) =>
+        currentTeam.id === team.id ? { ...currentTeam, name: nextName } : currentTeam),
+    }))
+    setError('')
+    setNotice('Team name saved.')
+  }
+
+  function removeMember(email: string) {
+    const normalizedMemberEmail = normalizeEmail(email)
+    onUpdate((current) => ({
+      ...current,
+      teams: current.teams.map((currentTeam) =>
+        currentTeam.id === team.id
+          ? { ...currentTeam, members: currentTeam.members.filter((member) => normalizeEmail(member.email) !== normalizedMemberEmail) }
+          : currentTeam),
+    }))
+    setError('')
+    setNotice('Team member removed.')
+  }
+
+  return (
+    <section className="team-detail-page">
+      <div className="breadcrumbs">
+        <Link to="/my-teams">My teams</Link>
+        <span>/</span>
+        <span>{team.name}</span>
+      </div>
+      <div className="page-heading">
+        <div>
+          <p className="eyebrow">TEAM WORKSPACE · {event.name}</p>
+          <h1>{team.name}</h1>
+          <p className="page-description">{team.members.length} member{team.members.length === 1 ? '' : 's'}</p>
+        </div>
+        <Link className="button button-secondary" to={`/events/${event.id}/teams`}>Event teams</Link>
+      </div>
+      <div className="event-join-code team-join-code" aria-label={`Static team code ${team.teamCode}`}>
+        <span>Share this static code so others can join</span>
+        <code>{team.teamCode}</code>
+      </div>
+      {isCreator && (
+        <form className="event-form team-edit-form" onSubmit={saveName}>
+          <h2>Edit team</h2>
+          <label>
+            Team name
+            <input required value={name} onChange={(eventForm) => setName(eventForm.target.value)} />
+          </label>
+          <button className="button button-primary" type="submit">Save team</button>
+        </form>
+      )}
+      <section className="team-roster">
+        <div className="section-heading">
+          <div>
+            <h2>Team members</h2>
+            <p>People assigned to {team.name}.</p>
+          </div>
+        </div>
+        {team.members.length ? (
+          <ul className="member-list team-detail-members">
+            {team.members.map((member, index) => {
+              const savedProfile = profiles.find((candidate) =>
+                member.email && normalizeEmail(candidate.email) === normalizeEmail(member.email))
+              const displayName = savedProfile?.name ?? member.name
+              return (
+                <li key={`${member.email || index}`}>
+                  <span>
+                    <strong>{displayName}</strong>
+                    {member.email && <small>{member.email}</small>}
+                  </span>
+                  {isCreator && member.email && normalizeEmail(member.email) !== normalizeEmail(currentEmail) && (
+                    <button className="member-remove" type="button" onClick={() => removeMember(member.email)}>
+                      Remove
+                    </button>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        ) : <p className="teams-empty">No members have been added to this team yet.</p>}
+        {error && <p className="field-error" role="alert">{error}</p>}
+        {notice && !error && <p className="team-detail-notice" role="status">{notice}</p>}
+      </section>
+    </section>
+  )
+}
+
 function EventDashboard({
   profile,
+  profiles,
   profileError,
   onProfileSave,
   onSignOut,
 }: {
   profile: Profile
+  profiles: Profile[]
   profileError: string
   onProfileSave: (profile: Profile) => boolean
   onSignOut: () => void
 }) {
-  const [initialState] = useState(loadEvents)
+  const [initialState] = useState(() => loadEvents(profile.email))
   const [events, setEvents] = useState(initialState.events)
   const [storageError, setStorageError] = useState(initialState.error)
   const location = useLocation()
   const navigate = useNavigate()
-  const activeEvent = events.find((event) => location.pathname.startsWith(`/events/${event.id}`))
+  const visibleEvents = events.filter((event) => event.memberEmails.includes(normalizeEmail(profile.email)))
+  const activeEvent = visibleEvents.find((event) => location.pathname.startsWith(`/events/${event.id}`))
+  const teamRouteParts = location.pathname.split('/')
+  const teamRouteEvent = visibleEvents.find((event) => event.id === teamRouteParts[2])
+  const teamRouteTeam = teamRouteEvent?.teams.find((team) => team.id === teamRouteParts[3])
+  const canViewTeamRoute = teamRouteTeam && (
+    normalizeEmail(teamRouteTeam.createdByEmail ?? '') === normalizeEmail(profile.email) ||
+    teamRouteTeam.members.some((member) =>
+      member.email && normalizeEmail(member.email) === normalizeEmail(profile.email))
+  )
 
-  function createEvent(details: Omit<HackathonEvent, 'id' | 'teams' | 'rooms' | 'mentors'>) {
-    const createdEvent: HackathonEvent = { ...details, id: crypto.randomUUID(), teams: [], rooms: [], mentors: [] }
+  function createEvent(details: Omit<HackathonEvent, 'id' | 'joinCode' | 'memberEmails' | 'teams' | 'rooms' | 'mentors'>) {
+    const usedCodes = new Set(events.map((event) => event.joinCode))
+    let joinCode: string
+    do {
+      joinCode = createJoinCode()
+    } while (usedCodes.has(joinCode))
+    const createdEvent: HackathonEvent = {
+      ...details,
+      id: crypto.randomUUID(),
+      joinCode,
+      memberEmails: [normalizeEmail(profile.email)],
+      teams: [],
+      rooms: [],
+      mentors: [],
+    }
     const nextEvents = [...events, createdEvent]
     try {
       localStorage.setItem(storageKey, JSON.stringify(nextEvents))
@@ -747,6 +1134,69 @@ function EventDashboard({
     setStorageError('')
   }
 
+  function joinEvent(code: string): boolean {
+    const normalizedCode = code.trim().toUpperCase()
+    const event = events.find((savedEvent) => savedEvent.joinCode === normalizedCode)
+    if (!event) {
+      setStorageError('No event was found with that code. Check the code and try again.')
+      return false
+    }
+
+    const email = normalizeEmail(profile.email)
+    const nextEvents = events.map((savedEvent) =>
+      savedEvent.id === event.id && !savedEvent.memberEmails.includes(email)
+        ? { ...savedEvent, memberEmails: [...savedEvent.memberEmails, email] }
+        : savedEvent)
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(nextEvents))
+      setEvents(nextEvents)
+      setStorageError('')
+      navigate(`/events/${event.id}`)
+      return true
+    } catch {
+      setStorageError('You could not join this event. Check your browser storage settings and try again.')
+      return false
+    }
+  }
+
+  function joinTeam(code: string): { eventId: string; teamId: string } | string {
+    const normalizedCode = code.trim().toUpperCase()
+    const matchingEvent = events.find((event) =>
+      event.teams.some((team) => team.teamCode === normalizedCode))
+    const matchingTeam = matchingEvent?.teams.find((team) => team.teamCode === normalizedCode)
+    if (!matchingEvent || !matchingTeam) {
+      return 'No team was found with that code. Check the code and try again.'
+    }
+
+    const email = normalizeEmail(profile.email)
+    if (matchingTeam.members.some((member) => normalizeEmail(member.email) === email)) {
+      return { eventId: matchingEvent.id, teamId: matchingTeam.id }
+    }
+    if (matchingEvent.teams.some((team) =>
+      team.members.some((member) => member.email && normalizeEmail(member.email) === email))) {
+      return 'You are already a member of another team in this event.'
+    }
+
+    const nextEvents = events.map((event) => event.id === matchingEvent.id
+      ? {
+        ...event,
+        memberEmails: event.memberEmails.includes(email) ? event.memberEmails : [...event.memberEmails, email],
+        teams: event.teams.map((team) => team.id === matchingTeam.id
+          ? { ...team, members: [...team.members, { email, name: profile.name }] }
+          : team),
+      }
+      : event)
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(nextEvents))
+      setEvents(nextEvents)
+      setStorageError('')
+      return { eventId: matchingEvent.id, teamId: matchingTeam.id }
+    } catch {
+      setStorageError('You could not join this team. Check your browser storage settings and try again.')
+      return 'Your team membership could not be saved. Check your browser storage settings and try again.'
+    }
+  }
+
   return (
     <div className="layout">
       <header className="topbar">
@@ -765,9 +1215,12 @@ function EventDashboard({
         <NavLink to="/profile" className="nav-link">
           <span aria-hidden="true">○</span> Profile
         </NavLink>
-        <p className="nav-label events-label">EVENTS <span>{events.length}</span></p>
-        {events.length === 0 && <p className="nav-empty">No events created</p>}
-        {events.map((event) => {
+        <NavLink to="/my-teams" className="nav-link">
+          <span aria-hidden="true">◈</span> My teams
+        </NavLink>
+        <p className="nav-label events-label">EVENTS <span>{visibleEvents.length}</span></p>
+        {visibleEvents.length === 0 && <p className="nav-empty">No events joined</p>}
+        {visibleEvents.map((event) => {
           const selected = activeEvent?.id === event.id
           return (
             <div className="event-nav-group" key={event.id}>
@@ -792,15 +1245,28 @@ function EventDashboard({
       <main className="content">
         {storageError && <p className="storage-error" role="alert">{storageError}</p>}
         <Routes>
-          <Route path="/" element={<Dashboard events={events} onCreateEvent={createEvent} />} />
+          <Route path="/" element={<Dashboard events={visibleEvents} onCreateEvent={createEvent} onJoinEvent={joinEvent} />} />
           <Route path="/profile" element={<ProfilePage profile={profile} error={profileError} onSave={onProfileSave} />} />
+          <Route path="/my-teams" element={<MyTeamsPage events={visibleEvents} email={profile.email} onJoinTeam={joinTeam} />} />
+          <Route
+            path="/my-teams/:eventId/:teamId"
+            element={teamRouteEvent && teamRouteTeam && canViewTeamRoute
+              ? <MyTeamDetailPage
+                event={teamRouteEvent}
+                team={teamRouteTeam}
+                profiles={profiles}
+                currentEmail={profile.email}
+                onUpdate={(update) => updateEvent(teamRouteEvent.id, update)}
+              />
+              : <Navigate to="/my-teams" replace />}
+          />
           <Route
             path="/events/:eventId"
-            element={activeEvent ? <EventPage event={activeEvent} onUpdate={(update) => updateEvent(activeEvent.id, update)} /> : <Navigate to="/" replace />}
+            element={activeEvent ? <EventPage event={activeEvent} profiles={profiles} currentEmail={profile.email} usedTeamCodes={events.flatMap((event) => event.teams.map((team) => team.teamCode))} onUpdate={(update) => updateEvent(activeEvent.id, update)} /> : <Navigate to="/" replace />}
           />
           <Route
             path="/events/:eventId/:section"
-            element={activeEvent && sections.some((item) => item.slug === location.pathname.split('/').pop()) ? <EventPage event={activeEvent} onUpdate={(update) => updateEvent(activeEvent.id, update)} /> : <Navigate to="/" replace />}
+            element={activeEvent && sections.some((item) => item.slug === location.pathname.split('/').pop()) ? <EventPage event={activeEvent} profiles={profiles} currentEmail={profile.email} usedTeamCodes={events.flatMap((event) => event.teams.map((team) => team.teamCode))} onUpdate={(update) => updateEvent(activeEvent.id, update)} /> : <Navigate to="/" replace />}
           />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
@@ -881,6 +1347,7 @@ function App() {
   return (
     <EventDashboard
       profile={profile}
+      profiles={accounts.map(({ profile: savedProfile }) => savedProfile)}
       profileError={storageError}
       onProfileSave={saveProfile}
       onSignOut={() => {
