@@ -1500,8 +1500,8 @@ function AuthScreen({
     <main className="auth-page">
       <section className="auth-panel" aria-labelledby="auth-title">
         <Link className="auth-brand" to="/" aria-label="Mule Hacks home">
-          <span className="brand-mark" aria-hidden="true">M</span>
-          <span>Mule Hacks <span className="brand-light">Admin</span></span>
+          <span className="brand-mark" aria-hidden="true">E</span>
+          <span>Eventov </span>
         </Link>
         <div className="auth-intro">
           <p className="eyebrow">{isSignUp ? 'JOIN YOUR EVENT TEAM' : 'WELCOME BACK'}</p>
@@ -1550,7 +1550,7 @@ function AuthScreen({
           </button>
         </form>
         <p className="auth-switch">
-          {isSignUp ? 'Already have an account?' : 'New to Mule Hacks?'}{' '}
+          {isSignUp ? 'Already have an account?' : 'New to Eventov?'}{' '}
           <button type="button" onClick={() => switchMode(!isSignUp)}>{isSignUp ? 'Sign in' : 'Create an account'}</button>
         </p>
         <p className="demo-notice">Demo mode · Accounts are saved in this browser only</p>
