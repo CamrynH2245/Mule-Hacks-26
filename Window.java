@@ -33,7 +33,11 @@ public class Window {
                 String userInput = textBox.getText();
                 
                 // Update the label with the input text
-                label.setText(userInput);
+                label.setText(String.format(
+            "<html>===================" +
+            "<br>____Group names____" +
+            "<br>===================" +
+            "<br>1) %s", userInput));
             }          
         });
 
