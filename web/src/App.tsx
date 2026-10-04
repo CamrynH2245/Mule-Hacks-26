@@ -784,10 +784,10 @@ function AuthScreen({
   return (
     <main className="auth-page">
       <section className="auth-panel" aria-labelledby="auth-title">
-        <a className="auth-brand" href="/" aria-label="Mule Hacks home">
+        <Link className="auth-brand" to="/" aria-label="Mule Hacks home">
           <span className="brand-mark" aria-hidden="true">M</span>
           <span>Mule Hacks <span className="brand-light">Admin</span></span>
-        </a>
+        </Link>
         <div className="auth-intro">
           <p className="eyebrow">{isSignUp ? 'JOIN YOUR EVENT TEAM' : 'WELCOME BACK'}</p>
           <h1 id="auth-title">{isSignUp ? 'Create your account' : 'Sign in to your account'}</h1>

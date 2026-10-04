@@ -2,7 +2,10 @@ import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
+const pagesBasePath = process.env.VITE_GH_PAGES_BASE_PATH || '/'
+
 export default defineConfig({
+  base: pagesBasePath,
   plugins: [
     react(),
     VitePWA({
@@ -15,8 +18,8 @@ export default defineConfig({
         theme_color: '#1e293b',
         background_color: '#ffffff',
         display: 'standalone',
-        start_url: '/',
-        icons: [{ src: 'favicon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
+        start_url: pagesBasePath,
+        icons: [{ src: `${pagesBasePath}favicon.svg`, sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
       },
     }),
   ],

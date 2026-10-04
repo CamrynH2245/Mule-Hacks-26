@@ -11,3 +11,6 @@ Sign-up collects a name, date of birth, email, phone number, and password. In de
     npm install
     npm run dev       # dev server
     npm run build && npm run preview   # test PWA/service worker
+
+## Deploy to GitHub Pages
+Set the repository's Pages source to **GitHub Actions** in Settings → Pages → Build and deployment. A successful CI run for a push to `main` triggers the Pages deployment; you can also run the Deploy GitHub Pages workflow manually on `main`.
